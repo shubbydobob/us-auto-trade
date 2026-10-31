@@ -1,0 +1,8 @@
+env: live
+broker:
+  base_url: "https://openapi.koreainvestment.com:9443"
+  ws_url: "ws://ops.koreainvestment.com:21000"
+risk:
+  # KRW 100,000 plumbing test: 1% rule is unusable at this size (position would be $2.90).
+  # single_position_mode forces one full-allocation position with a fixed stop.
+  single_position_mode: true

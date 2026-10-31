@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# secrets
+.env
+config/.env
+data/.kis_token.json
+
+# data artifacts
+data/*.duckdb
+data/*.duckdb.wal
+data/parquet/
+data/KILL
+logs/
+reports/
+*.pkl

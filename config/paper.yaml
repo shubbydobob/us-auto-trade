@@ -1,0 +1,6 @@
+env: paper
+broker:
+  base_url: "https://openapivts.koreainvestment.com:29443"
+  ws_url: "ws://ops.koreainvestment.com:31000"
+risk:
+  equity_usd_override: 7250        # ~KRW 10,000,000 for meaningful forward-test stats

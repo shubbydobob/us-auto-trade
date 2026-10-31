@@ -1,0 +1,108 @@
+# Base configuration. paper.yaml / live.yaml override selected keys.
+
+paths:
+  duckdb: "data/market.duckdb"
+  parquet_minute: "data/parquet/minute"
+  kill_file: "data/KILL"
+  reports: "reports"
+
+universe:
+  exchanges: ["NASDAQ", "NYSE", "AMEX"]       # KIS-tradeable only. No OTC/ARCA/BATS/IEX.
+  core_price_min: 1.00
+  core_price_max: 7.00
+  watch_price_min: 0.50
+  watch_price_max: 10.00
+  min_addv_floor: 300000                       # USD; actual floor is max(this, derived)
+  min_addv_60: 200000
+  min_median_volume_20: 150000
+  max_cs_spread: 0.03
+  min_listed_sessions: 250
+  no_split_within_sessions: 30
+  exclude_financial_status: ["Q"]              # bankrupt. D/E are flagged, not dropped.
+  exclude_sic: [6770]                          # blank-check SPACs
+  exclude_annual_forms: ["20-F", "40-F"]       # foreign private issuers / ADRs
+
+features:
+  version: 1
+  percentile_window: 252
+  base_window: 20
+  regime_window: 60
+
+labeling:
+  horizon_days: 20
+  upper_barrier: 0.60
+  lower_barrier: -0.20
+  atr_variant: {k_up: 10.0, k_dn: 3.5}
+  exclude_gap_up_above: 0.60                   # T+1 open above upper barrier -> unachievable
+  exclude_gap_down_below: -0.15
+
+risk:
+  # Sizing auto-switches to single-position mode below small_account_usd.
+  risk_per_trade: 0.01
+  small_account_usd: 1450                      # ~KRW 2,000,000 @ 1380
+  stop_atr_mult: 2.5
+  stop_min_pct: 0.20
+  max_notional_pct_equity: 0.08                # hard, enforced in sizing.py
+  max_participation: 0.01                      # hard
+  max_notional_pct_addv: 0.02                  # hard
+  max_concurrent_positions: 10
+  max_portfolio_heat: 0.05
+  max_new_entries_per_day: 3
+  daily_loss_soft: -0.03
+  daily_loss_hard: -0.06
+  drawdown_halt: -0.20
+  consecutive_losses_halve: 8
+  max_orders_per_session: 30
+  max_orders_per_symbol: 5
+  min_universe_ingest_rate: 0.85               # below this -> data-quality breaker
+
+exits:
+  tp1_gain: 0.30
+  tp1_fraction: 0.3333
+  tp2_gain: 0.80
+  tp2_fraction: 0.3333
+  trail_pct_of_high: 0.25
+  trail_pct_tight: 0.18
+  trail_tighten_above_gain: 2.00
+  trail_atr_mult: 3.0
+  exhaustion_min_gain: 1.50
+  exhaustion_volume_mult: 3.0
+  time_stop_sessions: 15
+  time_stop_min_gain: 0.12
+
+costs:
+  commission_per_side: 0.0025                  # KIS US online
+  sec_fee_rate: 0.0000278                      # sells only
+  finra_taf_per_share: 0.000166
+  finra_taf_cap: 8.30
+  impact_k: 0.4                                # square-root law coefficient
+  cs_spread_multiplier: 1.5                    # calibrate in Phase 1
+  tick_size: 0.01
+  stop_limit_penalty: 0.02                     # KIS has no stop-market; stops fill worse
+  cost_multiplier: 1.0                         # stress-test knob: 1.0 / 1.5 / 2.0
+
+entry:
+  max_watchlist: 40                            # KIS websocket hard limit is 41
+  skip_gap_up_above: 0.20
+  skip_gap_down_below: -0.08
+  min_first5min_volume_ratio: 0.10
+  max_quoted_spread: 0.025
+  trigger_window_start: "09:35"
+  trigger_window_end: "14:00"
+  volume_confirm_mult: 1.5
+  limit_over_ask: 0.004
+  limit_over_trigger: 0.01
+  child_order_count: 3
+  child_order_interval_sec: 60
+  cancel_unfilled_at: "15:45"
+  max_signal_carry_sessions: 2
+  # backtest daily-bar entry proxy
+  bt_skip_open_above: 1.20
+  bt_skip_open_below: 0.92
+  bt_limit_over_open: 1.01
+  bt_limit_cap_over_close: 1.08
+  bt_carry_sessions: 2
+
+broker:
+  rate_limit_per_sec: 0.8                      # KIS overseas hard limit is 1/sec
+  token_refresh_margin_hours: 2
