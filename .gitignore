@@ -18,3 +18,7 @@ data/KILL
 logs/
 reports/
 *.pkl
+
+# OMC operational state
+.omc/
+!.omc/skills/

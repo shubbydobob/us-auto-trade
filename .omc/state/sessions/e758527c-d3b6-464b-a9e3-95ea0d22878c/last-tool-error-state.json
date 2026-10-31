@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"tail -8 logs/backfill.log; echo \\\"=== db ===\\\"; PYTHONPATH=src python -c \\\"\\nfrom uat.storage.db import query\\nprint(query('SELECT count(*) bars, count(distinct symbol) syms, min(dt) first...",
-  "error": "Exit code 1\n02:34:54 INFO    uat.data.ingest | ingest progress\r\n02:34:54 INFO    uat.data.ingest | ingest complete\r\n                 requested: 4729\r\n                 with_data: 4685\r\n                   missing: 44\r\n                      rows: 7891983\r\n              success_rate: 0.9907\r\n   below_quality_threshold: False\r\n=== db ===\nTraceback (most recent call last):\r\n  File \"<string>\", line 3, in <module>\r\n  File \"C:\\Projects\\us-auto-trade\\src\\uat\\storage\\db.py\", line 75, in query\r\n    return c...",
-  "timestamp": "2026-10-31T17:35:31.514Z",
-  "retry_count": 1
-}
