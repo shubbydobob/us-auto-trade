@@ -110,3 +110,70 @@ accumulation" thesis: quiet names that exploded and then died are the ones most
 likely to be missing. So the finding that compression does not predict
 explosions is measured on a sample that, if anything, should have favoured it —
 but a Polygon re-run remains the proper test.
+
+---
+
+# Phase 3 result: the gate FAILS
+
+Full backtest, 2019-01-01 to present, 600-symbol sample, KRW 10,000,000
+(~$7,246), top-15 daily signals, exits and sizing as specified.
+
+| cost multiplier | strategy CAGR | shuffled control | gap |
+|---|---|---|---|
+| 1.0x | **-3.71%** | -5.30% | +1.6pp |
+| 1.5x | **-3.84%** | -7.49% | +3.7pp |
+
+The signal is real: it beats a random pick from the same universe on the same
+days at every cost level, and the gap *widens* as costs rise because the signal
+selects names that pay more per win (avg win 29.2% vs 16.9%). But both are
+negative. The gate requires beating the control **and** being profitable, so
+this is a FAIL.
+
+## Why it loses
+
+Hit rate 28.7% with a payoff ratio of 2.29. Break-even at that hit rate needs
+2.48. The strategy is close but short, and the shortfall is roughly the size of
+the transaction costs.
+
+Exit attribution (1.0x costs, 579 trades):
+
+| exit | n | avg return | total P&L |
+|---|---|---|---|
+| trail | 83 | +45.3% | **+$3,317** |
+| thesis break | 305 | -11.1% | **-$2,908** |
+| stop | 56 | -17.5% | -$1,693 |
+| time | 118 | -3.4% | -$476 |
+
+The winners work. There are simply too many small losers for them to carry.
+
+The thesis-break exit was the first suspect, but the data clears it: those
+trades have a median MFE of +2.8% and **none** ever reached +30%, so it is
+cutting genuine duds at -11% rather than at the -20% hard stop. Removing it
+would make things worse.
+
+## Two things that were ruled out
+
+**Portfolio saturation.** Exposure sits at 99.9% and 22,703 entries were
+blocked by `max_concurrent`, so the book is permanently full and may never
+reach the best signals. In-sample, tightening to the top 3 names per day turned
+expectancy positive (+1.27%/trade at 1.5x costs) with a clean monotonic
+improvement in hit rate and average win as K fell -- exactly the signature of a
+ranking with real power.
+
+**It did not survive out of sample.** K was searched on 2019-2026; re-tested on
+the held-out 2024-2026 window the advantage disappeared:
+
+| variant | CAGR (2024-2026, 1.5x) |
+|---|---|
+| evidence, top-3 | -6.17% |
+| evidence, top-15 | -10.86% |
+| thesis, top-3 | -14.65% |
+| shuffled control, top-3 | -16.09% |
+
+What *does* replicate out of sample is the ordering: evidence beats thesis beats
+random, by 9-10 percentage points of CAGR. The ranking is genuine; no setting of
+K makes it profitable.
+
+This is recorded rather than tuned away. Searching K on the full sample and
+adopting the winner is precisely the overfitting this project is meant to
+detect, and the out-of-sample test caught it.
