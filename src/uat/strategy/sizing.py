@@ -27,9 +27,28 @@ MAX_PARTICIPATION = 0.01
 MAX_NOTIONAL_PCT_ADDV = 0.02
 
 
+# Beyond this, a stop is not a stop. The level would sit at or below zero and
+# gets clamped to the tick floor, which silently removes all downside control.
+MAX_STOP_PCT = 0.50
+
+
 def stop_distance(entry_px: float, atr14: float, atr_mult: float, min_pct: float) -> float:
     """Penny stops must be wide; a 2% stop is noise, not risk management."""
     return max(atr_mult * atr14, min_pct * entry_px)
+
+
+def stop_is_viable(entry_px: float, atr14: float, atr_mult: float, min_pct: float) -> bool:
+    """Whether a meaningful stop can be placed at all.
+
+    SDEV carries an ATR of 49% of price and JAGX 84%, so 2.5x ATR exceeds the
+    share price outright and the stop clamps to $0.01 -- a position with no
+    risk control wearing the costume of one. Roughly 0.8% of the gated universe
+    is like this on any given day, and because volatility is a scored feature
+    the ranking actively steers toward them.
+    """
+    if entry_px <= 0:
+        return False
+    return stop_distance(entry_px, atr14, atr_mult, min_pct) <= MAX_STOP_PCT * entry_px
 
 
 def size_position(
@@ -46,6 +65,7 @@ def size_position(
     open_risk_total: float = 0.0,
     max_portfolio_heat: float = 0.05,
     min_fill_fraction: float = 0.5,
+    clamp_stop: bool = True,
     single_position_mode: bool | None = None,
 ) -> SizingResult:
     """Shares to buy, after every cap. Shared by backtest and live."""
@@ -55,6 +75,16 @@ def size_position(
     dist = stop_distance(entry_px, atr14, atr_mult, stop_min_pct)
     if dist <= 0:
         return SizingResult(0, 0.0, 0.0, 0.0, rejected=True, reject_reason="zero_stop_distance")
+    # Clamp rather than reject. On the most volatile names 2.5x ATR exceeds the
+    # share price, which previously clamped the stop level to $0.01 -- no risk
+    # control at all. Capping the DISTANCE keeps the name tradeable with a real
+    # (if wide) stop, and the wider distance correctly shrinks the position.
+    # Refusing these names outright was tried and cost far more than it saved.
+    dist = min(dist, MAX_STOP_PCT * entry_px) if clamp_stop else dist
+    if not clamp_stop and not stop_is_viable(entry_px, atr14, atr_mult, stop_min_pct):
+        return SizingResult(
+            0, 0.0, 0.0, 0.0, rejected=True, reject_reason="stop_wider_than_price"
+        )
     stop_px = max(0.01, entry_px - dist)
 
     small = equity < small_account_usd if single_position_mode is None else single_position_mode

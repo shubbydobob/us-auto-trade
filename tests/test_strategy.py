@@ -385,3 +385,50 @@ def test_trail_activation_defaults_to_tp1_gain():
     assert not trail_is_active(pos, p)
     pos.hc_since_entry = 1.00 + p.tp1_gain + 0.01
     assert trail_is_active(pos, p)
+
+
+def test_stop_distance_is_clamped_when_atr_exceeds_the_price():
+    """2.5 x ATR can exceed the share price on the most volatile penny names.
+
+    SDEV's ATR is 49% of price and JAGX's is 84%, so the stop level went
+    negative and clamped to $0.01 -- a position with no downside control that
+    looked like it had one. Volatility is a scored feature, so the ranking
+    steers straight at these names.
+
+    The distance is capped instead of the name being refused: refusing cost far
+    more than it saved (out-of-sample CAGR went -0.09% -> -11.11%), because the
+    unstopped positions were where the winners were running.
+    """
+    from uat.strategy.sizing import MAX_STOP_PCT, stop_is_viable
+
+    # SDEV: $1.01 with ATR $0.499 -> raw stop distance $1.248, wider than price
+    assert not stop_is_viable(1.01, 0.499, 2.5, 0.20)
+    r = size_position(equity=10_000, entry_px=1.01, atr14=0.499,
+                      median_volume_20=5_000_000, addv_20=10_000_000)
+    assert not r.rejected
+    assert r.stop_px == pytest.approx(1.01 * (1 - MAX_STOP_PCT))
+    assert r.stop_px > 0.02, "a $0.01 stop is not a stop"
+
+    # QTEX: $1.22 with ATR $0.168 -> 34% stop, under the cap and untouched
+    assert stop_is_viable(1.22, 0.168, 2.5, 0.20)
+    ok = size_position(equity=10_000, entry_px=1.22, atr14=0.168,
+                       median_volume_20=5_000_000, addv_20=10_000_000)
+    assert ok.stop_px == pytest.approx(1.22 - 2.5 * 0.168)
+
+
+def test_clamp_can_be_disabled_to_refuse_unstoppable_names():
+    r = size_position(equity=10_000, entry_px=1.01, atr14=0.499,
+                      median_volume_20=5_000_000, addv_20=10_000_000,
+                      clamp_stop=False)
+    assert r.rejected
+    assert r.reject_reason == "stop_wider_than_price"
+
+
+def test_stop_floor_still_applies_to_quiet_names():
+    """A tiny ATR must not produce a 2% stop; the 20% minimum governs."""
+    from uat.strategy.sizing import stop_is_viable
+
+    assert stop_is_viable(5.00, 0.01, 2.5, 0.20)
+    r = size_position(equity=10_000, entry_px=5.00, atr14=0.01,
+                      median_volume_20=5_000_000, addv_20=10_000_000)
+    assert r.stop_px == pytest.approx(4.00)
