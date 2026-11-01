@@ -45,6 +45,7 @@ def size_position(
     small_account_usd: float = 1450.0,
     open_risk_total: float = 0.0,
     max_portfolio_heat: float = 0.05,
+    min_fill_fraction: float = 0.5,
     single_position_mode: bool | None = None,
 ) -> SizingResult:
     """Shares to buy, after every cap. Shared by backtest and live."""
@@ -67,7 +68,12 @@ def size_position(
     else:
         risk_dollars = equity * risk_per_trade
         headroom = max(0.0, equity * max_portfolio_heat - open_risk_total)
-        if headroom <= 0:
+        # Reject rather than shrink. Squeezing a full-size idea into whatever
+        # heat is left produces dust positions -- an earlier version averaged
+        # $94 notional on a $7,246 account with 12% of capital deployed, so the
+        # backtest was measuring an uninvested portfolio. A position that does
+        # not fit the risk budget is a position you do not take.
+        if headroom < risk_dollars * min_fill_fraction:
             return SizingResult(
                 0, 0.0, stop_px, 0.0, rejected=True, reject_reason="portfolio_heat_exhausted"
             )

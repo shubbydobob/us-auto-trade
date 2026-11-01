@@ -177,3 +177,70 @@ K makes it profitable.
 This is recorded rather than tuned away. Searching K on the full sample and
 adopting the winner is precisely the overfitting this project is meant to
 detect, and the out-of-sample test caught it.
+
+---
+
+# Experiment B: liquidity band — negative, and a sizing bug found
+
+## The bug (invalidated the first Phase 3 numbers)
+
+The first Phase 3 run deployed only **12% of capital**: average position $94 on
+a $7,246 account, median notional $28.68, minimum $0.52.
+
+Cause was a config contradiction. `max_concurrent_positions: 10` at
+`risk_per_trade: 1%` implies 10% portfolio heat, but `max_portfolio_heat` was
+5%. The sizer resolved the conflict by *shrinking* each new position into
+whatever heat remained, so positions six through ten were dust. The backtest was
+measuring an uninvested portfolio.
+
+Fixed two ways, both now covered by tests:
+* `size_position` rejects when less than half a full-size risk budget remains,
+  rather than shrinking to dust.
+* `max_concurrent_positions` lowered to 5 so `n * risk <= heat` holds, with
+  `test_risk_budget_settings_are_internally_consistent` guarding it.
+
+## The experiment
+
+Four price/liquidity bands fixed in advance, every one reported in both
+windows so the result cannot be a search for the band that wins.
+
+| band | IS CAGR | OOS CAGR | payoff IS→OOS | OOS maxDD |
+|---|---|---|---|---|
+| baseline $0.5-10 / 0.3M | -4.29% | -6.67% | 1.98 → 1.58 | -22.1% |
+| B1 $3-10 / 5M | -2.83% | **-1.93%** | 1.52 → 1.35 | **-8.3%** |
+| B2 $2-10 / 2M | -1.59% | -4.81% | 2.03 → 1.34 | -13.9% |
+| B3 $5-20 / 10M | -2.35% | -4.89% | 1.11 → 1.35 | -13.5% |
+
+Moving up the liquidity ladder cuts the drawdown hard (-22% → -8%) and halves
+the loss, but the payoff ratio falls with it (1.98 → 1.52). Less is saved in
+spread than is lost from the tail. **No band is profitable in either window.**
+
+## The decisive test: zero transaction costs
+
+If costs were the binding constraint, removing them entirely should produce a
+profitable strategy. They are not.
+
+| band | risk/trade | capital deployed | expectancy | CAGR |
+|---|---|---|---|---|
+| baseline | 1% | 8% | +8.19% | **+2.05%** |
+| baseline | 3% | 13% | +2.02% | **-4.49%** |
+| B1 | 1% | 10% | +0.27% | -0.15% |
+| B1 | 3% | 27% | -1.94% | -2.37% |
+
+With free trading the best case is about +2% a year on 8% deployed capital, and
+**raising risk per trade makes it worse** — the losers scale with the winners,
+which is what "no exploitable edge" looks like. A real edge gets better when
+you lever it.
+
+Note also the structural ceiling: risking 1% per trade with a ~22% stop gives a
+4.5% position, so five slots cap deployment near 22% no matter how good the
+signal is. Even a working signal could not move this account much at these
+settings.
+
+## Verdict
+
+The signal has genuine *ranking* power — it beats a random pick from the same
+universe on the same days in every window, at every cost level, by 2-12
+percentage points of CAGR. It does not have *absolute* edge. Costs are not the
+obstacle; the edge is simply too small to survive contact with any trading
+system built on it.

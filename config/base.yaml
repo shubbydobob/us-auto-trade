@@ -45,7 +45,10 @@ risk:
   max_notional_pct_equity: 0.08                # hard, enforced in sizing.py
   max_participation: 0.01                      # hard
   max_notional_pct_addv: 0.02                  # hard
-  max_concurrent_positions: 10
+  # These three must stay consistent: max_concurrent * risk_per_trade <= heat.
+  # Previously 10 x 1% = 10% against a 5% cap, which the sizer resolved by
+  # shrinking later positions to dust instead of refusing them.
+  max_concurrent_positions: 5
   max_portfolio_heat: 0.05
   max_new_entries_per_day: 3
   daily_loss_soft: -0.03

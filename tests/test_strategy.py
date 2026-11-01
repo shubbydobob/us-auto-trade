@@ -284,3 +284,35 @@ def test_sub_75_cent_band_is_the_lesser_of_75pct_and_15_cents():
     assert luld_band(0.10, doubled=False) == pytest.approx(0.75)
     # At $0.50, 15c/price = 30% which is below 75%.
     assert luld_band(0.50, doubled=False) == pytest.approx(0.30)
+
+
+def test_risk_budget_settings_are_internally_consistent():
+    """max_concurrent * risk_per_trade must fit inside max_portfolio_heat.
+
+    When they disagree the sizer has to resolve it somehow, and shrinking is
+    the wrong answer: it silently produced $28-median positions on a $7,246
+    account and made the backtest measure an uninvested portfolio.
+    """
+    from uat.config import load_settings
+
+    s = load_settings("paper")
+    n = s.get("risk.max_concurrent_positions")
+    per = s.get("risk.risk_per_trade")
+    heat = s.get("risk.max_portfolio_heat")
+    assert n * per <= heat + 1e-9, (
+        f"{n} positions x {per:.1%} risk = {n*per:.1%} exceeds the {heat:.1%} heat cap"
+    )
+
+
+def test_heat_exhaustion_rejects_rather_than_shrinking_to_dust():
+    full = size_position(equity=10_000, entry_px=1.00, atr14=0.10,
+                         median_volume_20=5_000_000, addv_20=3_000_000,
+                         open_risk_total=0.0, max_portfolio_heat=0.05)
+    assert not full.rejected
+
+    # Only 10% of a full-size risk budget left: take nothing, not a dust position.
+    nearly_full = size_position(equity=10_000, entry_px=1.00, atr14=0.10,
+                                median_volume_20=5_000_000, addv_20=3_000_000,
+                                open_risk_total=490, max_portfolio_heat=0.05)
+    assert nearly_full.rejected
+    assert nearly_full.reject_reason == "portfolio_heat_exhausted"
