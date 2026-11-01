@@ -20,7 +20,7 @@ from uat.logging import get
 
 log = get("broker.kis_auth")
 
-TOKEN_FILE = "data/.kis_token.json"
+TOKEN_FILE = "data/.kis_token_{env}.json"
 
 
 class MissingCredentials(RuntimeError):
@@ -41,36 +41,59 @@ class KisCredentials:
 
 
 def load_credentials(env: str | None = None) -> KisCredentials:
-    """Read credentials from the environment (populated from .env by config)."""
+    """Read credentials for the active environment.
+
+    Paper and live are separate KIS registrations: different app keys, different
+    secrets and usually a different account. Live values are read from
+    KIS_LIVE_* and fall back to the unprefixed names, so a paper-only .env keeps
+    working while a live run can never silently pick up the paper key.
+    """
     settings = load_settings(env)
+    prefix = "KIS_LIVE_" if settings.is_live else "KIS_"
+
+    def pick(name: str, default: str | None = None) -> str | None:
+        return os.environ.get(f"{prefix}{name}") or (
+            os.environ.get(f"KIS_{name}") if settings.is_live else None
+        ) or default
+
+    app_key = pick("APP_KEY")
+    app_secret = pick("APP_SECRET")
+    account_8 = pick("ACCOUNT_8")
+    account_2 = pick("ACCOUNT_2", "01")
+
     missing = [
-        k
-        for k in ("KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_8")
-        if not os.environ.get(k)
+        n
+        for n, v in (("APP_KEY", app_key), ("APP_SECRET", app_secret),
+                     ("ACCOUNT_8", account_8))
+        if not v
     ]
     if missing:
         raise MissingCredentials(
-            "missing "
-            + ", ".join(missing)
-            + f" -- copy .env.example to .env and fill it in (KIS_ENV={settings.env})"
+            f"missing {', '.join(prefix + m for m in missing)} for KIS_ENV={settings.env}"
+            " -- see .env.example"
         )
     return KisCredentials(
-        app_key=os.environ["KIS_APP_KEY"],
-        app_secret=os.environ["KIS_APP_SECRET"],
-        account_8=os.environ["KIS_ACCOUNT_8"],
-        account_2=os.environ.get("KIS_ACCOUNT_2", "01"),
+        app_key=app_key,
+        app_secret=app_secret,
+        account_8=account_8,
+        account_2=account_2 or "01",
         env=settings.env,
     )
 
 
-def _token_path() -> Path:
-    p = project_root() / TOKEN_FILE
+def _token_path(env: str) -> Path:
+    """One cache file per environment.
+
+    Sharing a single file means alternating paper/live invalidates the other
+    token every switch, and KIS throttles issuance to about once a minute.
+    """
+    p = project_root() / TOKEN_FILE.format(env=env)
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _read_cached(env: str, margin_hours: float) -> str | None:
-    p = _token_path()
+    p = _token_path(env)
     if not p.exists():
         return None
     try:
@@ -86,7 +109,7 @@ def _read_cached(env: str, margin_hours: float) -> str | None:
 
 
 def _write_cached(env: str, token: str, expires_in: int) -> None:
-    _token_path().write_text(
+    _token_path(env).write_text(
         json.dumps(
             {
                 "env": env,
