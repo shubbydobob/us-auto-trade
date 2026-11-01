@@ -47,6 +47,34 @@ EVIDENCE_WEIGHTS: list[tuple[str, str, float]] = [
     ("vol_slope_20", "high", 3.0),
 ]
 
+# The user's chart-reading hypothesis stated as a scorer: buy the confirmed
+# move -- a fresh 20/60 golden cross and a reclaim of the long-term average,
+# with volume behind it.
+#
+# The lift table rates these features in the OPPOSITE direction (no golden
+# cross 17.05% vs golden cross 4.36% against a 4.89% base), but that is
+# mechanical: a breakout is confirmed partway into the move, so less of the
+# +60% target remains. Lift alone cannot settle it, because buying confirmation
+# should trade hit rate against payoff. Only a backtest with real exits can,
+# which is why this is a first-class scorer rather than a footnote.
+BREAKOUT_WEIGHTS: list[tuple[str, str, float]] = [
+    ("brk200_vol_confirmed", "high", 20.0),
+    ("gc_vol_confirmed", "high", 18.0),
+    ("brk120_vol_confirmed", "high", 15.0),
+    ("ma_align_score", "high", 12.0),
+    ("rvol_10", "high", 12.0),
+    ("vol_slope_20", "high", 8.0),
+    ("sma200_slope", "high", 7.0),
+    ("px_vs_sma200", "high", 5.0),
+    ("obv_slope_20", "high", 3.0),
+]
+
+SCORERS = {
+    "evidence": EVIDENCE_WEIGHTS,
+    "thesis": THESIS_WEIGHTS,
+    "breakout": BREAKOUT_WEIGHTS,
+}
+
 # Hard gates applied before scoring. Deliberately few: the universe gate in
 # universe/filters.py already handles liquidity, price band and listing status,
 # and every extra gate here is another degree of freedom to overfit.

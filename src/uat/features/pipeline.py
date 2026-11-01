@@ -174,13 +174,53 @@ def compute_symbol_features(df: pd.DataFrame) -> pd.DataFrame:
         l.rolling(20, min_periods=20).min() > l.shift(20).rolling(20, min_periods=20).min()
     ).astype(float)
 
+    sma10 = c.rolling(10, min_periods=10).mean()
     sma20 = c.rolling(20, min_periods=20).mean()
     sma50 = c.rolling(50, min_periods=50).mean()
+    sma60 = c.rolling(60, min_periods=60).mean()
+    sma120 = c.rolling(120, min_periods=100).mean()
+    sma200 = c.rolling(200, min_periods=150).mean()
     out["ma_stack"] = ((c > sma20) & (sma20 > sma20.shift(10))).astype(float)
     out["sma50_rising"] = (sma50 > sma50.shift(20)).astype(float)
     # Informational only -- most penny bases sit below the 200MA, so gating on
     # this would delete the entire opportunity set.
-    out["px_vs_sma200"] = c / c.rolling(200, min_periods=150).mean() - 1
+    out["px_vs_sma200"] = c / sma200 - 1
+    out["px_vs_sma120"] = c / sma120 - 1
+
+    # ---------- moving-average crossovers and long-term breakouts ----------
+    # A golden cross and a reclaim of the long-term average are the two things
+    # visible on the reference chart right before the vertical move. Measured,
+    # not assumed: research/evaluate.py decides whether they add anything over
+    # the trend features already present, several of which they correlate with.
+    out["golden_cross_20_60"] = (sma20 > sma60).astype(float)
+    out["gc_age_20_60"] = _event_age(sma20 > sma60, cap=120)
+    out["gc_fresh_20_60"] = (out["gc_age_20_60"] <= 10).astype(float)
+
+    out["ma_align_score"] = (
+        (c > sma10).astype(float)
+        + (sma10 > sma20).astype(float)
+        + (sma20 > sma60).astype(float)
+        + (sma60 > sma120).astype(float)
+    )
+
+    out["above_sma200"] = (c > sma200).astype(float)
+    out["brk200_age"] = _event_age(c > sma200, cap=120)
+    out["brk200_fresh"] = (out["brk200_age"] <= 10).astype(float)
+    out["above_sma120"] = (c > sma120).astype(float)
+    out["brk120_age"] = _event_age(c > sma120, cap=120)
+    out["brk120_fresh"] = (out["brk120_age"] <= 10).astype(float)
+
+    out["sma200_slope"] = safe_div(sma200 - sma200.shift(20), sma200)
+    out["sma120_slope"] = safe_div(sma120 - sma120.shift(20), sma120)
+
+    # Volume-confirmed versions. A breakout on no volume is noise; the thesis
+    # is specifically that volume arrives with the move. Multiplicative so a
+    # quiet breakout cannot score on the breakout leg alone.
+    rvol_term = out["rvol_10"].clip(lower=0, upper=5).fillna(1.0)
+    out["gc_vol_confirmed"] = out["gc_fresh_20_60"] * rvol_term
+    out["brk200_vol_confirmed"] = out["brk200_fresh"] * rvol_term
+    out["brk120_vol_confirmed"] = out["brk120_fresh"] * rvol_term
+    out["align_vol_confirmed"] = (out["ma_align_score"] / 4.0) * rvol_term
 
     # ---------- liquidity / microstructure ----------
     out["gap_freq_60"] = (
@@ -193,6 +233,27 @@ def compute_symbol_features(df: pd.DataFrame) -> pd.DataFrame:
         * 1e6
     )
     return out
+
+
+def _event_age(condition: pd.Series, cap: int = 120) -> pd.Series:
+    """Sessions since `condition` last turned False->True, capped.
+
+    Trailing-only: the value at T counts backwards from T and never inspects a
+    later bar. NaN until the condition has been observable.
+    """
+    cond = condition.fillna(False).to_numpy(bool)
+    n = len(cond)
+    age = np.full(n, np.nan)
+    since = None
+    for i in range(n):
+        if cond[i]:
+            if i == 0 or not cond[i - 1]:
+                since = i
+            age[i] = min(i - since, cap)
+        else:
+            since = None
+            age[i] = cap
+    return pd.Series(age, index=condition.index)
 
 
 def _anchored_vwap_ratio(tp: pd.Series, v: pd.Series, low: pd.Series, window: int) -> pd.Series:

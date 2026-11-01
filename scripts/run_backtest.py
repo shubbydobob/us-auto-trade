@@ -36,7 +36,7 @@ from uat.backtest.metrics import (  # noqa: E402
 from uat.config import load_settings, project_root  # noqa: E402
 from uat.data.ingest_daily import load_bars  # noqa: E402
 from uat.features.pipeline import build_features  # noqa: E402
-from uat.model.rules import EVIDENCE_WEIGHTS, THESIS_WEIGHTS, score, top_k  # noqa: E402
+from uat.model.rules import SCORERS, score, top_k  # noqa: E402
 from uat.strategy.exits import ExitParams  # noqa: E402
 from uat.universe.filters import bar_level_metrics, classify_tier  # noqa: E402
 
@@ -73,7 +73,7 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
     cols = [
         "symbol", "dt", "atr14", "medvol_20", "addv_20", "rvol_5",
         "mfi_14", "ret_20",
-    ] + [f for f, _, _ in EVIDENCE_WEIGHTS + THESIS_WEIGHTS]
+    ] + [f for w in SCORERS.values() for f, _, _ in w]
     cols = list(dict.fromkeys(c for c in cols if c in feats.columns))
     panel = bars.merge(feats[cols], on=["symbol", "dt"], how="left")
     panel = panel.merge(gate, on=["symbol", "dt"], how="inner")
@@ -90,8 +90,7 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
 
 
 def make_signals(panel: pd.DataFrame, which: str, k: int) -> pd.DataFrame:
-    weights = EVIDENCE_WEIGHTS if which == "evidence" else THESIS_WEIGHTS
-    scored = score(panel, weights)
+    scored = score(panel, SCORERS[which])
     picks = top_k(scored, k=k)
     return picks[["dt", "symbol", "score"]]
 
@@ -132,7 +131,7 @@ def main() -> None:
     ap.add_argument("--start", default="2019-01-01")
     ap.add_argument("--end", default=None)
     ap.add_argument("--capital", type=float, default=10_000_000, help="KRW")
-    ap.add_argument("--scorer", choices=["evidence", "thesis"], default="evidence")
+    ap.add_argument("--scorer", choices=list(SCORERS), default="evidence")
     ap.add_argument("--stress", type=float, nargs="+", default=[1.0, 1.5, 2.0])
     ap.add_argument("--top-k", type=int, default=15)
     ap.add_argument("--max-symbols", type=int, default=None)

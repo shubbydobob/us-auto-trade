@@ -417,3 +417,58 @@ survives even with the held-out window.
 **Status: breakeven out of sample, still not profitable.** The portfolio layer
 accounted for roughly 4 percentage points of the earlier loss; closing that gap
 did not create an edge, it removed a handicap.
+
+---
+
+# Experiment D: golden cross and long-term MA breakout
+
+User hypothesis from the ONEG chart: add a 20/60 golden cross and a reclaim of
+the long-term moving average, confirmed by volume.
+
+Implemented as real features -- `golden_cross_20_60`, `gc_age_20_60`,
+`ma_align_score`, `above_sma200` / `above_sma120` with breakout ages,
+`sma200_slope`, plus volume-confirmed products of each -- and as a first-class
+`BREAKOUT_WEIGHTS` scorer, so it could be judged on P&L rather than on a lift
+table alone.
+
+## Lift: the golden cross is the strongest single feature, with the sign flipped
+
+| feature | bottom decile | top decile | base 4.89% |
+|---|---|---|---|
+| **golden_cross_20_60** | **17.05%** (no cross) | 4.36% (cross active) | 3.49x vs 0.89x |
+| above_sma200 | 7.00% (below) | 4.57% (above) | |
+| above_sma120 | 7.68% (below) | 4.96% (above) | |
+| sma200_slope | 10.13% (falling) | 7.08% (rising) | |
+
+It ranked first of 54 candidates -- but the predictive tail is the *absence* of
+a golden cross. Names below their long-term averages, with falling long-term
+slopes, explode 3.5x more often than names that have already crossed.
+
+The reason is mechanical rather than mysterious: a breakout confirms partway
+into the move, so less of the +60%/20-day target remains. On the ONEG chart
+itself the long-term average is reclaimed in late April and the peak is 5 May.
+
+## Backtest: buying confirmation is worse than random
+
+Lift alone could not settle this, because buying confirmation should trade hit
+rate against payoff. Run with identical exits (Experiment C best), identical
+universe, identical sizing:
+
+| cost | scorer | CAGR train | CAGR test | hit test | maxDD test |
+|---|---|---|---|---|---|
+| 1.0x | breakout | -3.81% | -9.07% | 33.9% | -25.5% |
+| 1.0x | **evidence** | **+0.71%** | **-0.42%** | 35.0% | **-7.4%** |
+| 1.0x | thesis | -7.22% | -10.85% | 25.3% | -29.2% |
+| 1.0x | random control | - | -10.26% | 25.7% | -29.8% |
+| 1.5x | breakout | -7.01% | -11.85% | 31.5% | -32.1% |
+| 1.5x | **evidence** | **-0.61%** | **-0.09%** | 26.6% | **-9.0%** |
+| 1.5x | random control | - | -12.94% | 26.2% | -32.9% |
+
+Breakout is roughly indistinguishable from picking at random, and its drawdown
+is 3x the evidence scorer's. Consistent in both windows, so it is not a
+sampling accident. Buying the confirmed breakout means buying one to two weeks
+before the collapse.
+
+The information in these features is real -- it was the top-ranked feature set
+-- but the tradeable direction is the one the evidence scorer already uses:
+buy the base, not the breakout.
