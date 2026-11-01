@@ -316,3 +316,72 @@ def test_heat_exhaustion_rejects_rather_than_shrinking_to_dust():
                                 open_risk_total=490, max_portfolio_heat=0.05)
     assert nearly_full.rejected
     assert nearly_full.reject_reason == "portfolio_heat_exhausted"
+
+
+def test_trail_engages_without_the_tp_ladder():
+    """Disabling the TP ladder must not silently disable the trail.
+
+    The trail used to engage only once a TP tranche had fired, so a "let winners
+    run" configuration degraded into "hold to the hard stop" -- three different
+    trail widths produced byte-identical backtests before this was caught.
+    """
+    from uat.strategy.exits import trail_is_active
+
+    no_ladder = ExitParams(tp1_gain=9.99, tp1_fraction=0.0,
+                           tp2_gain=9.99, tp2_fraction=0.0,
+                           trail_activate_gain=0.15)
+    pos = make_position(entry=1.00, atr=0.10)
+
+    pos.hc_since_entry = 1.10            # +10%, below the activation gain
+    assert not trail_is_active(pos, no_ladder)
+
+    pos.hc_since_entry = 1.25            # +25%, above it
+    assert trail_is_active(pos, no_ladder)
+    assert pos.state is PositionState.OPEN   # activated without any TP firing
+
+
+def test_trail_width_actually_changes_the_exit_level():
+    """Guards the specific symptom: different widths must give different stops."""
+    from uat.strategy.exits import trailing_stop
+
+    # Large ATR pushes the ATR leg far below price, so the percent leg binds.
+    # (A small ATR does the opposite: 3 x 0.01 sits just under the high and wins
+    # the max(), which is why an earlier version of this test compared equals.)
+    pos = make_position(entry=1.00, atr=0.20)
+    pos.hh_since_entry = 1.60
+    pos.hc_since_entry = 1.60                   # +60%, below trail_tighten_above_gain
+
+    wide = ExitParams(tp1_gain=9.99, tp1_fraction=0.0, trail_pct_of_high=0.35,
+                      trail_activate_gain=0.15)
+    tight = ExitParams(tp1_gain=9.99, tp1_fraction=0.0, trail_pct_of_high=0.20,
+                       trail_activate_gain=0.15)
+    assert trailing_stop(pos, tight) > trailing_stop(pos, wide)
+
+
+def test_tight_trail_takes_over_above_the_tighten_threshold():
+    """Past trail_tighten_above_gain the width switches to trail_pct_tight, so
+    trail_pct_of_high stops mattering -- worth pinning so it is not mistaken
+    for the activation bug."""
+    from uat.strategy.exits import trailing_stop
+
+    pos = make_position(entry=1.00, atr=0.01)
+    pos.hh_since_entry = 3.00
+    pos.hc_since_entry = 3.00                   # +200%, at the threshold
+
+    a = ExitParams(tp1_gain=9.99, tp1_fraction=0.0, trail_pct_of_high=0.35,
+                   trail_pct_tight=0.18, trail_activate_gain=0.15)
+    b = ExitParams(tp1_gain=9.99, tp1_fraction=0.0, trail_pct_of_high=0.20,
+                   trail_pct_tight=0.18, trail_activate_gain=0.15)
+    assert trailing_stop(pos, a) == pytest.approx(trailing_stop(pos, b))
+
+
+def test_trail_activation_defaults_to_tp1_gain():
+    """Leaving trail_activate_gain unset preserves the original behaviour."""
+    from uat.strategy.exits import trail_is_active
+
+    p = ExitParams()          # trail_activate_gain is None
+    pos = make_position(entry=1.00)
+    pos.hc_since_entry = 1.00 + p.tp1_gain - 0.01
+    assert not trail_is_active(pos, p)
+    pos.hc_since_entry = 1.00 + p.tp1_gain + 0.01
+    assert trail_is_active(pos, p)

@@ -345,3 +345,75 @@ roughly 4.5% of equity.
 rather than structural.** The strategy went from "no edge at any cost level" to
 "breaks even around 1.0-1.5x costs in-sample, negative out-of-sample on a small
 sample".
+
+---
+
+# Experiment C: deployment and capture
+
+Two leaks in the portfolio layer, neither about stock selection. Searched on
+2019-2023 only; 2024-2026 held out and reported for every variant so the
+degradation is visible.
+
+## A second exit bug, found by the experiment itself
+
+Three "no take-profit, pure trail" variants with different trail widths (25%,
+20%, 35%) produced **byte-identical** results. Cause: the trail engaged only
+once a TP tranche had fired, so disabling the ladder silently disabled the
+trail and every variant degraded to "hold to the hard stop". The
+let-winners-run hypothesis had never actually been tested.
+
+Fixed with `ExitParams.trail_activate_gain`: the trail now starts tracking once
+peak gain passes a threshold, independently of the ladder. `None` keeps the
+original behaviour of tying activation to `tp1_gain`. Three tests pin it,
+including one asserting different widths give different stop levels.
+
+## Step 1 -- deployment: adding slots makes it worse
+
+| variant | deploy | CAGR train | CAGR test | maxDD test |
+|---|---|---|---|---|
+| **5 slots x 1% (current)** | 5% | **-1.59%** | **-5.43%** | -15.9% |
+| 10 slots x 1% | 14% | -3.13% | -7.18% | -21.0% |
+| 15 slots x 1% | 22% | -5.20% | -13.18% | -32.9% |
+| 5 slots x 2% | 8% | -5.70% | -7.86% | -22.6% |
+| 10 slots x 2% | 16% | -5.78% | -11.69% | -30.6% |
+
+Monotone and consistent across both windows: more capital at work is worse.
+The 7% deployment is not a bug to fix -- widening the book just admits weaker
+signals. Deployment is low because risking 1% behind a ~22% stop gives a 4.5%
+position, and that is the correct size for the risk taken.
+
+## Step 2 -- capture: removing the ladder helps
+
+| variant | capture | CAGR train | CAGR test | maxDD test |
+|---|---|---|---|---|
+| E0 current TP 30/80, trail 25% | 22% | -1.59% | -5.43% | -15.9% |
+| E1 no TP, trail 25% from +15% | 14% | -2.80% | -3.36% | -10.6% |
+| E4 **no TP, trail 25% from +40%** | 9% | **-0.61%** | **-0.09%** | **-9.0%** |
+| E5 TP 50/150, trail 30% | 12% | -3.71% | -2.88% | -9.8% |
+| E6 TP 80 only, trail 30% | 3% | -1.69% | -1.75% | -10.5% |
+
+Taking a third off at +30% caps exactly the trades that are supposed to pay for
+everything else. Letting the position run and arming the trail at +40% was best
+on train and held up out of sample.
+
+## Out-of-sample result for the train-selected configuration
+
+| cost | CAGR | maxDD | control | verdict |
+|---|---|---|---|---|
+| 1.0x | -0.42% | -7.4% | -10.26% | FAIL |
+| 1.5x | **-0.09%** | -9.0% | -12.94% | FAIL |
+| 2.0x | +1.14% | -5.3% | -18.57% | PASS |
+
+Out-of-sample went from -3.98% to -0.09% at 1.5x costs -- breakeven rather than
+losing, with drawdown cut to -9% against the control's -13%.
+
+**Do not read the 2.0x PASS as a result.** Returns improving as costs rise is
+not possible mechanically; it means higher costs filtered out a different, and
+by luck better, set of fills. That non-monotonicity is the signature of a
+sample too small to distinguish these variants: ~250 train trades and ~100 test
+trades, with one configuration chosen out of seven. Some selection bias
+survives even with the held-out window.
+
+**Status: breakeven out of sample, still not profitable.** The portfolio layer
+accounted for roughly 4 percentage points of the earlier loss; closing that gap
+did not create an edge, it removed a handicap.

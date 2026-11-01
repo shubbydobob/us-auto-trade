@@ -41,6 +41,12 @@ class ExitParams:
     exhaustion_volume_mult: float = 3.0
     time_stop_sessions: int = 15
     time_stop_min_gain: float = 0.12
+    # Gain at which the trail starts tracking, independent of the TP ladder.
+    # Previously the trail engaged only after TP1 fired, so disabling the ladder
+    # silently disabled the trail too and "let winners run" could not be tested
+    # at all -- it degraded to "hold to the hard stop". None keeps the old
+    # behaviour of tying activation to tp1_gain.
+    trail_activate_gain: float | None = None
 
     @classmethod
     def from_settings(cls, settings) -> "ExitParams":
@@ -53,6 +59,19 @@ def update_trackers(pos: Position, bar: Bar) -> None:
     pos.hh_since_entry = max(pos.hh_since_entry, bar.high)
     pos.hc_since_entry = max(pos.hc_since_entry, bar.close)
     pos.sessions_held += 1
+
+
+def trail_is_active(pos: Position, p: ExitParams) -> bool:
+    """Whether the trail is tracking yet.
+
+    Either a TP tranche has fired, or the position's peak gain has passed
+    `trail_activate_gain` (defaulting to tp1_gain). The second condition is what
+    lets the ladder be switched off without also switching off the trail.
+    """
+    if pos.state in (PositionState.TP1, PositionState.TP2):
+        return True
+    threshold = p.trail_activate_gain if p.trail_activate_gain is not None else p.tp1_gain
+    return pos.gain >= threshold
 
 
 def trailing_stop(pos: Position, p: ExitParams) -> float:
@@ -99,7 +118,7 @@ def evaluate_exits(
 
     # 1. Hard stop / trailing stop -- adverse first, always.
     stop_level = pos.stop_px
-    if pos.state in (PositionState.TP1, PositionState.TP2):
+    if trail_is_active(pos, params):
         stop_level = max(stop_level, trailing_stop(pos, params))
 
     if bar.low <= stop_level:
