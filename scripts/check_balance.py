@@ -15,6 +15,11 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+# The Windows console defaults to cp949 here, which cannot encode Korean output
+# or symbols like the warning sign and kills the script mid-report.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from uat.broker.kis_auth import MissingCredentials  # noqa: E402
@@ -65,22 +70,23 @@ def main() -> None:
     print()
 
     bp = client.overseas_buying_power(args.probe_symbol, "NASD", args.probe_price)
+    fx = KRW_PER_USD
     if not bp.ok:
         print(f"[buying power] FAILED rt_cd={bp.rt_cd} {bp.msg}")
     else:
         o = bp.output if isinstance(bp.output, dict) else {}
-        usd = _num(o, "ord_psbl_frcr_amt", "frcr_ord_psbl_amt1", "ovrs_ord_psbl_amt")
-        krw = _num(o, "ord_psbl_krw_amt", "frcr_ord_psbl_amt")
+        # ord_psbl_frcr_amt is USD (tr_crcy_cd confirms). exrt is KIS's own
+        # rate, which beats hardcoding one.
+        usd = _num(o, "ord_psbl_frcr_amt", "ovrs_ord_psbl_amt")
+        fx = _num(o, "exrt") or KRW_PER_USD
         max_qty = _num(o, "max_ord_psbl_qty", "ovrs_max_ord_psbl_qty")
         print("=== 매수가능금액 (buying power) ===")
-        print(f"  외화 주문가능   : $ {usd:,.2f}   (~KRW {usd*KRW_PER_USD:,.0f})")
-        if krw:
-            print(f"  원화 주문가능   : KRW {krw:,.0f}")
+        print(f"  주문가능        : $ {usd:,.2f}   (~KRW {usd*fx:,.0f})")
+        print(f"  적용환율        : {fx:,.2f} KRW/USD")
         if max_qty:
             print(f"  {args.probe_symbol} @ ${args.probe_price:.2f} 최대 {max_qty:,.0f}주")
-        if not usd and not krw:
-            print("  (no recognised amount field; raw output below)")
-            print(f"  {o}")
+        if not usd:
+            print(f"  (no recognised amount field; raw output: {o})")
 
     print()
     bal = client.overseas_balance()
@@ -104,15 +110,24 @@ def main() -> None:
             print(f"  {sym:<8} {qty:>8,.0f}주  평단 ${avg:>8.4f}  현재 ${now:>8.4f}  "
                   f"평가손익 ${pnl:>9,.2f} ({rate:+.2f}%)")
         if summary:
-            tot = _num(summary, "tot_evlu_pfls_amt")
-            asset = _num(summary, "frcr_evlu_tota", "tot_asst_amt")
-            print(f"  ---- 총 평가손익 ${tot:,.2f}   총자산 ${asset:,.2f} "
-                  f"(~KRW {asset*KRW_PER_USD:,.0f})")
+            # output2 is denominated in KRW, not USD -- frcr_pchs_amt1 of
+            # 9,701,405 against ~$7.3k of holdings only makes sense as won.
+            pnl_krw = _num(summary, "tot_evlu_pfls_amt", "ovrs_tot_pfls")
+            cost_krw = _num(summary, "frcr_pchs_amt1", "frcr_buy_amt_smtl1")
+            rate = _num(summary, "tot_pftrt")
+            print(f"  ---- 매입원금 KRW {cost_krw:,.0f} (~$ {cost_krw/fx:,.2f})")
+            print(f"       평가손익 KRW {pnl_krw:,.0f} (~$ {pnl_krw/fx:,.2f})  "
+                  f"수익률 {rate:+.2f}%")
+
+        if rows:
+            print()
+            print("  ⚠ 이 계좌는 pivot-engine 의 모의 운용 계좌입니다. 위 보유 종목은")
+            print("    그쪽 전략이 낸 포지션이고, 여기서 주문을 내면 서로 간섭합니다.")
 
     print()
     print("=== what this account can run ===")
     o = bp.output if (bp.ok and isinstance(bp.output, dict)) else {}
-    usd = _num(o, "ord_psbl_frcr_amt", "frcr_ord_psbl_amt1", "ovrs_ord_psbl_amt")
+    usd = _num(o, "ord_psbl_frcr_amt", "ovrs_ord_psbl_amt")
     if usd <= 0:
         print("  buying power unavailable -- cannot advise on sizing")
     else:
@@ -126,7 +141,7 @@ def main() -> None:
         print(f"  mode          : {mode}")
         print(f"  position size : ~$ {pos:,.2f}")
         print(f"  threshold     : $ {small_threshold:,.0f} "
-              f"(~KRW {small_threshold*KRW_PER_USD:,.0f}) switches to the 1% rule")
+              f"(~KRW {small_threshold*fx:,.0f}) switches to the 1% rule")
 
     client.close()
 
