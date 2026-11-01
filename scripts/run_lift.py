@@ -142,8 +142,9 @@ def main() -> None:
           f"{s.get('labeling.lower_barrier'):.0%} in {s.get('labeling.horizon_days')}d) "
           f"= {base_rate*100:.2f}%")
     print(f"nominal positives      : {ess['nominal_positives']:,}")
-    print(f"independent episodes   : {ess['independent_episodes']:,}  "
+    print(f"symbol episodes        : {ess['symbol_episodes']:,}  "
           f"(inflation {ess['inflation_factor']}x)")
+    print(f"calendar clusters      : {ess['calendar_clusters']:,}")
     print("  ^ model complexity is bounded by the episode count, not the row count")
     print("=" * 74)
     print()

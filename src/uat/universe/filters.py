@@ -30,9 +30,19 @@ NON_COMMON_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# "Ordinary Shares" marks a foreign-domiciled issuer (typically a 20-F filer or a
-# Cayman SPAC); their volume is driven by non-US sessions and corrupts RVOL.
-ADR_PATTERNS = re.compile(r"american\s+depositar|ordinary\s+shares?", re.IGNORECASE)
+# Only TRUE depositary receipts are excluded. The rationale for dropping them is
+# that a dual-listed issuer's volume is driven by its home-market session, which
+# corrupts RVOL and every other volume feature.
+#
+# That rationale does NOT apply to a Cayman/BVI holdco whose only listing is on
+# NASDAQ -- it has no home market. An earlier version matched "Ordinary Shares"
+# too and removed 905 symbols, a group whose 20-day explosion rate is 3-5x the
+# retained universe (P(+50%) 24.6% vs 8.0%, P(+100%) 11.9% vs 2.3%). That is the
+# target population for this strategy, excluded by a filter whose stated reason
+# did not apply to it.
+ADR_PATTERNS = re.compile(
+    r"american\s+depositar|\bADR\b|\bADS\b|depositary\s+(?:share|receipt)", re.IGNORECASE
+)
 
 # NASDAQ appends a bare 5th character for non-common issues (W warrant, U unit,
 # R rights); otherlisted uses dotted/dashed suffixes like ".WS" / ".U" / ".R".

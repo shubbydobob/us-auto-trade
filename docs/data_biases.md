@@ -244,3 +244,104 @@ universe on the same days in every window, at every cost level, by 2-12
 percentage points of CAGR. It does not have *absolute* edge. Costs are not the
 obstacle; the edge is simply too small to survive contact with any trading
 system built on it.
+
+---
+
+# Universe filter bug: the ADR exclusion removed the target population
+
+## What happened
+
+`filter_listings` excluded any security whose name contained "Ordinary Shares",
+on the stated rationale that a foreign issuer's volume is driven by its
+home-market session and corrupts RVOL.
+
+That rationale is correct for a genuine dual-listed ADR. It does **not** apply
+to a Cayman or BVI holdco whose only listing is on NASDAQ -- such a company has
+no home market. The filter removed 905 symbols on a reason that did not apply
+to most of them.
+
+Found by checking three names the user was watching spike on 2026-10-30:
+
+| ticker | move | verdict |
+|---|---|---|
+| ULH $17.42 | +29.7% | correctly excluded: 60k median volume, and not a penny stock |
+| GDYN $9.49 | +40.8% | passed the universe, failed the hard gate on `mfi_14` 86.3 vs 85 |
+| SLGB $0.21 | +48.8% | excluded as "Class A Ordinary Shares" |
+
+SLGB is the thesis working exactly as described: volume went 58,000 -> 39,334,800
+shares (678x) on 2026-10-29 while the price moved -5.1%, then +48.8% the next
+session. The system never saw it.
+
+## Magnitude
+
+| group | symbols | P(+50% in 20d) | P(+100% in 20d) |
+|---|---|---|---|
+| excluded "ordinary shares" | 436 | **24.59%** | **11.87%** |
+| retained universe | 2,232 | 8.01% | 2.31% |
+
+The excluded group explodes 3-5x more often than the universe every earlier
+result was computed on.
+
+## Are those moves tradeable?
+
+The obvious objection is that these are pump-and-dumps that spike and collapse
+in a day. Measured over all +100% episodes:
+
+| | ordinary shares | rest |
+|---|---|---|
+| median peak gain | +303% | +241% |
+| median days to peak | **14** | 15 |
+| peaked on day 1 | 2% | 1% |
+| median day-1 open gap | 0.0% | 0.0% |
+| gain still available after the day-1 open | +283% | +217% |
+| 5 days after the peak | **-26%** | -22% |
+
+The moves run for about two weeks, so there is time to participate. The
+objection is half right though: the give-back after the peak is sharp, and the
+trailing stop captures only ~31% of the maximum excursion.
+
+Caveat that cuts the other way: survivorship bias is **worse** for this group.
+Chinese small-cap shells delist far more often, so the 4,827 episodes measured
+come only from names still listed today. The +303% is optimistic.
+
+## Effect on the result
+
+Universe 4,729 -> 5,608 symbols. Re-running everything:
+
+| | before fix | after fix |
+|---|---|---|
+| CAGR 2019-2026 @1.0x | -3.71% | **+0.47%** |
+| CAGR 2019-2026 @1.5x | -3.84% | -0.45% |
+| hit rate | 28.7% | **39.6%** |
+| max drawdown | -26.1% | **-9.9%** |
+| gap over shuffled control | +1.6pp | **+8.4pp** |
+
+Split by window:
+
+| window | signal @1.0x | signal @1.5x | control @1.0x |
+|---|---|---|---|
+| 2019-2023 (in-sample) | +1.51% | +0.92% | -6.40% |
+| 2024-2026 (out-of-sample, 95 trades) | **-3.74%** | -3.98% | -12.44% |
+
+The in-sample profit cannot be trusted: `EVIDENCE_WEIGHTS` were read off a lift
+table computed over the whole period. The honest number is the out-of-sample
+-3.74%, on a thin 95 trades.
+
+Cost ceiling on the corrected universe:
+
+| cost | expectancy/trade | CAGR | capital deployed |
+|---|---|---|---|
+| 0.0x | +4.68% | +3.17% | 7% |
+| 1.0x | +1.43% | +0.47% | 7% |
+| 1.5x | +0.02% | -0.45% | 8% |
+| 2.0x | +0.89% | -0.93% | 5% |
+
+Costs are now genuinely close to binding -- expectancy crosses zero right
+around 1.5x, where it previously was negative even at 0x. Deployment remains
+near 7% because risking 1% per trade behind a ~22% stop caps position size at
+roughly 4.5% of equity.
+
+**Status: still FAIL on the out-of-sample gate, but the failure is now narrow
+rather than structural.** The strategy went from "no edge at any cost level" to
+"breaks even around 1.0-1.5x costs in-sample, negative out-of-sample on a small
+sample".
