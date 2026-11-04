@@ -159,21 +159,29 @@ def main() -> None:
             })
 
     df = pd.DataFrame(results)
-    eligible = df[~df.thin]
+    # BOTH guards bind on selection, not just the trade floor. The first version
+    # of this script excluded THIN but let an UNSTABLE cell win, and it picked
+    # H3/S15 whose holdout ran +15.4 / +6.3 / -1.9 across seeds -- a sign flip
+    # decided by which 1,200 symbols were drawn. That is the same mistake
+    # experiment E made, one layer up.
+    eligible = df[~df.thin & ~df.unstable]
     print()
-    print(f"cells meeting the {MIN_TRADES}-trade floor: {len(eligible)} of {len(df)}")
+    print(f"cells passing BOTH guards (n >= {MIN_TRADES}, seed-stable): "
+          f"{len(eligible)} of {len(df)}   "
+          f"[thin: {int(df.thin.sum())}, unstable: {int(df.unstable.sum())}]")
     if eligible.empty:
-        print("No cell is measurable. The honest answer is that this grid cannot "
-              "be decided at this sample size -- widen the universe or the "
-              "period before choosing anything.")
+        print("No cell is measurable AND stable. The honest answer is that this "
+              "grid cannot be decided at this sample size -- widen the universe "
+              "or the period before choosing anything.")
         return
 
-    # Selected on the MEAN TRAIN CAGR across seeds, among cells with enough
-    # trades. Still a selection, but one that cannot be won by a 28-trade fluke.
-    best = eligible.sort_values("cagr_tr", ascending=False).iloc[0]
-    print(f"train-selected (seed-averaged, >= {MIN_TRADES} trades): {best.label}")
-    print(f"  train {best.cagr_tr * 100:+.2f}%   test {best.cagr_te * 100:+.2f}%"
-          f"   n~{best.n}   unstable={bool(best.unstable)}")
+    ranked = eligible.sort_values("cagr_tr", ascending=False)
+    print("eligible cells by TRAIN CAGR (selection basis):")
+    for r in ranked.itertuples():
+        print(f"  {r.label:<40} train {r.cagr_tr * 100:+6.2f}%   "
+              f"test {r.cagr_te * 100:+6.2f}%   n~{r.n}")
+    best = ranked.iloc[0]
+    print(f"train-selected: {best.label}")
 
     print()
     print("=" * 124)
