@@ -134,6 +134,19 @@ def prepare_cached(start: date, end: date | None, max_symbols: int | None,
     return panel, s
 
 
+def apply_regime(signals: pd.DataFrame, panel: pd.DataFrame,
+                 mode: str = "none") -> pd.DataFrame:
+    """레짐 게이트를 시그널에 적용하고 무엇이 걸러졌는지 출력한다."""
+    from uat.model.regime import filter_signals
+
+    if mode == "none":
+        return signals
+    out = filter_signals(signals, panel, mode)
+    print(f"  레짐({mode}): 시그널 {len(signals):,} -> {len(out):,} "
+          f"({len(out) / max(len(signals), 1) * 100:.0f}% 통과)")
+    return out
+
+
 def make_signals(panel: pd.DataFrame, which: str, k: int) -> pd.DataFrame:
     """게이트 통과 행에서만 랭킹한다.
 
@@ -162,10 +175,19 @@ def random_signals(panel: pd.DataFrame, k: int, seed: int) -> pd.DataFrame:
     return out[["dt", "symbol", "score"]]
 
 
-def run_one(panel, signals, settings, equity_usd, cost_mult, enforce_halt=False):
+def run_one(panel, signals, settings, equity_usd, cost_mult, enforce_halt=False,
+            risk_per_trade=None):
     cost = CostParams.from_settings(settings)
     cost = CostParams(**{**cost.__dict__, "cost_multiplier": cost_mult})
     pp = PortfolioParams.from_settings(settings, initial_equity=equity_usd)
+    if risk_per_trade is not None:
+        # 리스크를 줄이면 DD 와 수익이 거의 비례해 함께 축소된다. 킬스위치
+        # 한도(-20%)를 맞추는 것은 커브 피팅이 아니라 사이징 결정이다.
+        # heat 를 같이 조정하지 않으면 사이저가 책을 조르는 쪽이 바뀐다.
+        pp = PortfolioParams(**{**pp.__dict__,
+                                "risk_per_trade": risk_per_trade,
+                                "max_portfolio_heat":
+                                    pp.max_concurrent * risk_per_trade})
     pp = PortfolioParams(**{**pp.__dict__, "enforce_drawdown_halt": enforce_halt})
     bt = Backtester(
         bars=panel,
@@ -188,6 +210,12 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=15)
     ap.add_argument("--max-symbols", type=int, default=None)
     ap.add_argument("--control", action="store_true")
+    ap.add_argument("--risk-per-trade", type=float, default=None,
+                    help="config 의 risk.risk_per_trade 를 덮어쓴다. DD 와 수익이 "
+                         "함께 비례 축소되므로 킬스위치 한도를 맞추는 손잡이다")
+    ap.add_argument("--regime", default=None,
+                    help="폭 기반 레짐 게이트: none/level20/level30/level40/"
+                         "sma50/sma100 (진입 억제만, 청산은 그대로)")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--enforce-halt", action="store_true",
                     help="latch the -20%% kill switch (live behaviour); off for research")
@@ -198,7 +226,11 @@ def main() -> None:
     end = date.fromisoformat(args.end) if args.end else None
 
     panel, settings = prepare(start, end, args.max_symbols, args.seed)
-    signals = make_signals(panel, args.scorer, args.top_k)
+    # --regime 을 주지 않으면 config 의 entry.regime_mode 를 쓴다. 게이트 실행과
+    # 라이브가 다른 레짐으로 돌아가는 일을 막는다.
+    regime_mode = args.regime or settings.get("entry.regime_mode") or "none"
+    signals = apply_regime(make_signals(panel, args.scorer, args.top_k),
+                           panel, regime_mode)
     print(f"  signals: {len(signals):,} ({signals.dt.nunique():,} sessions)")
     print()
     print(f"capital: KRW {args.capital:,.0f} = ${equity_usd:,.0f}   scorer: {args.scorer}")
@@ -211,7 +243,8 @@ def main() -> None:
     for mult in args.stress:
         print()
         print(f"--- COST MULTIPLIER {mult:.1f}x ---")
-        res = run_one(panel, signals, settings, equity_usd, mult, args.enforce_halt)
+        res = run_one(panel, signals, settings, equity_usd, mult,
+                      args.enforce_halt, args.risk_per_trade)
         rep = full_report(res.trades, res.equity)
         print(format_report(rep, res.trades, res.equity))
         halt_dt = res.params.get('first_drawdown_halt')
@@ -248,8 +281,13 @@ def main() -> None:
         print("SHUFFLED CONTROL (random top-15, same universe/days, same exits)")
         print("=" * 76)
         for mult in args.stress:
-            ctrl_sig = random_signals(panel, args.top_k, args.seed)
-            res = run_one(panel, ctrl_sig, settings, equity_usd, mult, args.enforce_halt)
+            # 대조군에도 같은 레짐 게이트를 적용한다. 그러지 않으면 레짐이
+            # 만든 개선이 "전략이 낫다"로 오독된다.
+            ctrl_sig = apply_regime(
+                random_signals(panel, args.top_k, args.seed), panel, regime_mode
+            )
+            res = run_one(panel, ctrl_sig, settings, equity_usd, mult,
+                          args.enforce_halt, args.risk_per_trade)
             rep = full_report(res.trades, res.equity)
             print(f"\n--- control @ {mult:.1f}x ---")
             print(format_report(rep, res.trades, res.equity))

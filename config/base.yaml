@@ -53,7 +53,13 @@ labeling:
 
 risk:
   # Sizing auto-switches to single-position mode below small_account_usd.
-  risk_per_trade: 0.004
+  # 0.0022. 리스크는 발견이 아니라 선택이다 -- DD 와 수익이 거의 비례해 함께
+  # 움직이므로, 킬스위치 한도(-20%)가 달성 가능한 수익을 결정한다. 실측
+  # (레짐 sma50, 비용 1.5x, 전구간):
+  #   risk 0.40%  CAGR +7.56%  최대DD -31.40%  킬스위치 2022-05 발동
+  #   risk 0.30%  CAGR +4.89%  최대DD -24.73%  킬스위치 2024-11 발동
+  #   risk 0.22%  CAGR +3.41%  최대DD -17.76%  발동 안 함   <- 채택
+  risk_per_trade: 0.0022
   small_account_usd: 1450                      # ~KRW 2,000,000 @ 1380
   stop_atr_mult: 2.5
   stop_min_pct: 0.20
@@ -71,7 +77,7 @@ risk:
   # count, and the sign flips: 5 -> 10 -> 15 -> 25 slots improved monotonically
   # on train AND holdout, in two independent symbol universes.
   max_concurrent_positions: 25
-  max_portfolio_heat: 0.10
+  max_portfolio_heat: 0.055        # = max_concurrent x risk_per_trade
   max_new_entries_per_day: 8
   daily_loss_soft: -0.03
   daily_loss_hard: -0.06
@@ -141,6 +147,16 @@ costs:
   cost_multiplier: 1.0                         # stress-test knob: 1.0 / 1.5 / 2.0
 
 entry:
+  # 폭(게이트 통과 종목 중 SMA200 위 비율) 기반 레짐 게이트. 진입 억제만 하고
+  # 보유 포지션은 건드리지 않는다 -- 레짐은 진입 판단이지 청산 규칙이 아니다.
+  # sma50 = 폭이 자기 50일 평균 위일 때만 진입. 임계값을 특정 연도에 맞춰 고르는
+  # 형태의 과적합을 피하려고 수준이 아니라 추세를 쓴다.
+  #
+  # 2022 를 -18.0% -> -1.4% 로 고쳤다(실험 J). 대가는 2023/2024 가 약간 악화된
+  # 것이고, 폭이 낮은 국면의 좋은 날도 함께 걸러지기 때문이다.
+  # 창 5개 서수 검정에서는 CAGR 기준 2/5 로 구조적 결과가 아니었으나, 구속
+  # 조건이 CAGR 이 아니라 최대DD 였으므로 그 근거로 채택했다. src/uat/model/regime.py
+  regime_mode: "sma50"
   max_watchlist: 40                            # KIS websocket hard limit is 41
   skip_gap_up_above: 0.20
   skip_gap_down_below: -0.08
