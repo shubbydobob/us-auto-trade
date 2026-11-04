@@ -10,7 +10,9 @@ Two scorers are provided deliberately:
 * THESIS  -- the user's original "quiet accumulation" formulation (volatility
   compression + rising volume). Kept as a measurable baseline so the thesis can
   be tracked rather than quietly abandoned.
-* EVIDENCE -- what the full-universe lift table actually supports.
+* EVIDENCE -- lift 가 지지하는 것. 2026-11-05 부터 전체 패널이 아니라 **TRAIN
+  구간의** lift 테이블에서 자동 유도한다(아래 주석 참조). 이전에는 전체 패널을
+  보고 사람이 피처를 골랐고, 그것은 구조적으로 in-sample 이었다.
 
 Both run in every evaluation. If EVIDENCE cannot beat the shuffled control, no
 execution code gets written; if THESIS beats EVIDENCE on better data later, the
@@ -35,16 +37,29 @@ THESIS_WEIGHTS: list[tuple[str, str, float]] = [
     ("udvr_20", "high", 5.0),
 ]
 
+# 2026-11-05 교체. 이전 가중치는 전체 패널 lift 테이블을 보고 사람이 피처를
+# 골라 손으로 정한 것이어서 구조적으로 in-sample 이었다(walkforward_check.py 의
+# 모듈 docstring 이 지적하던 그 문제다). 지금 값은
+# `walkforward_check.derive_weights` 가 **TRAIN(2019~2023-08, 100일 엠바고)의**
+# lift 테이블에서 lift 1.25 초과 피처만 자동 선별하고 lift-1 에 비례해 배분한
+# 것이다. 사람의 선택이 없다.
+#
+# 라벨은 60세션 +60%/-35% (실험 I). 이전 라벨(20세션 +60%/-20%)의 기저확률
+# 4.85% 는 너무 희귀해서 lift 추정 자체가 노이즈였다.
+#
+# `addv_20` 이 LOW 방향으로 들어온 것은 오타가 아니다. 실험 H 에서 유동성 하한을
+# 올리면 성과가 나빠졌고(ADDV >= $1M 은 5창 중 1창만 승), 비유동성 자체가 신호다.
+# `amihud_20`(비유동성)이 high 방향으로 가중되는 것과 같은 이야기다.
 EVIDENCE_WEIGHTS: list[tuple[str, str, float]] = [
-    ("gap_freq_60", "high", 20.0),
-    ("base_depth_60", "high", 18.0),
-    ("dist_from_high_252", "low", 17.0),
-    ("amihud_20", "high", 12.0),
-    ("rvol_20", "high", 10.0),
-    ("rvol_10", "high", 8.0),
-    ("vol_regime", "high", 7.0),
-    ("obv_slope_20", "high", 5.0),
-    ("vol_slope_20", "high", 3.0),
+    ("base_depth_60", "high", 15.2),
+    ("dist_from_high_252", "low", 14.5),
+    ("gap_freq_60", "high", 14.0),
+    ("amihud_20", "high", 12.7),
+    ("addv_20", "low", 9.6),
+    ("ret_20", "low", 9.1),
+    ("atr_ratio", "low", 9.0),
+    ("rvol_20", "high", 8.3),
+    ("obv_slope_20", "high", 7.5),
 ]
 
 # The user's chart-reading hypothesis stated as a scorer: buy the confirmed
@@ -52,7 +67,8 @@ EVIDENCE_WEIGHTS: list[tuple[str, str, float]] = [
 # with volume behind it.
 #
 # The lift table rates these features in the OPPOSITE direction (no golden
-# cross 17.05% vs golden cross 4.36% against a 4.89% base), but that is
+# cross 17.05% vs golden cross 4.36% against a 4.89% base -- 그 숫자는 구 라벨
+# (20세션 +60%/-20%) 기준이고, 현행 라벨에서는 기저가 15.79% 다), but that is
 # mechanical: a breakout is confirmed partway into the move, so less of the
 # +60% target remains. Lift alone cannot settle it, because buying confirmation
 # should trade hit rate against payoff. Only a backtest with real exits can,
