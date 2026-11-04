@@ -31,7 +31,7 @@ import pandas as pd
 
 from uat.backtest.costs import CostParams, fees, fill_price, stop_fill_price
 from uat.strategy.exits import ExitParams, apply_fill, evaluate_exits, update_trackers
-from uat.strategy.sizing import size_position
+from uat.strategy.sizing import size_position, stop_level
 from uat.strategy.types import Bar, ExitReason, Position, PositionState
 
 
@@ -399,7 +399,14 @@ class Backtester:
             qty_initial=shares,
             qty_open=shares,
             atr_at_entry=atr,
-            stop_px=max(0.01, px - max(self.pp.atr_mult * atr, self.pp.stop_min_pct * px)),
+            # stop_level, not a second formula. This line used to read
+            #   max(0.01, px - max(atr_mult * atr, stop_min_pct * px))
+            # which skips the 50%-of-price clamp commit 80f60b4 added to
+            # sizing.py. On a name whose ATR is 40% of price, 2.5x ATR is a
+            # 100%-of-price distance: the stop floored to $0.01 while the
+            # position was sized as though it had a 50% stop. Measured on a
+            # $1.00/0.40-ATR entry: $0.015 against the sizer's $0.5075.
+            stop_px=stop_level(px, atr, self.pp.atr_mult, self.pp.stop_min_pct),
             hh_since_entry=float(row["high"]),
             hc_since_entry=float(row["close"]),
         )
