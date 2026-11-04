@@ -23,20 +23,11 @@ if hasattr(sys.stdout, "reconfigure"):
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from uat.broker.kis_auth import MissingCredentials  # noqa: E402
-from uat.broker.kis_client import KisClient  # noqa: E402
+from uat.broker.kis_client import KisClient, kis_num as _num  # noqa: E402
 from uat.config import load_settings  # noqa: E402
+from uat.live import holdings as hold  # noqa: E402
 
 KRW_PER_USD = 1380.0
-
-
-def _num(d: dict, *keys) -> float:
-    for k in keys:
-        if k in d and str(d[k]).strip() not in ("", "-"):
-            try:
-                return float(str(d[k]).replace(",", ""))
-            except ValueError:
-                continue
-    return 0.0
 
 
 def main() -> None:
@@ -93,36 +84,36 @@ def main() -> None:
     if not bal.ok:
         print(f"[balance] FAILED rt_cd={bal.rt_cd} {bal.msg}")
     else:
-        rows = bal.raw.get("output1") or []
-        summary = bal.raw.get("output2") or {}
-        if isinstance(summary, list):
-            summary = summary[0] if summary else {}
+        rows = hold.parse_holdings(bal.raw)
+        summary = hold.parse_summary(bal.raw)
         print("=== 해외주식 잔고 ===")
         if not rows:
             print("  (보유 종목 없음)")
-        for r in rows:
-            sym = r.get("ovrs_pdno", "?")
-            qty = _num(r, "ovrs_cblc_qty")
-            avg = _num(r, "pchs_avg_pric")
-            now = _num(r, "now_pric2")
-            pnl = _num(r, "frcr_evlu_pfls_amt")
-            rate = _num(r, "evlu_pfls_rt")
-            print(f"  {sym:<8} {qty:>8,.0f}주  평단 ${avg:>8.4f}  현재 ${now:>8.4f}  "
-                  f"평가손익 ${pnl:>9,.2f} ({rate:+.2f}%)")
-        if summary:
-            # output2 is denominated in KRW, not USD -- frcr_pchs_amt1 of
-            # 9,701,405 against ~$7.3k of holdings only makes sense as won.
-            pnl_krw = _num(summary, "tot_evlu_pfls_amt", "ovrs_tot_pfls")
-            cost_krw = _num(summary, "frcr_pchs_amt1", "frcr_buy_amt_smtl1")
-            rate = _num(summary, "tot_pftrt")
-            print(f"  ---- 매입원금 KRW {cost_krw:,.0f} (~$ {cost_krw/fx:,.2f})")
-            print(f"       평가손익 KRW {pnl_krw:,.0f} (~$ {pnl_krw/fx:,.2f})  "
-                  f"수익률 {rate:+.2f}%")
+        for h in rows:
+            print(f"  {h.symbol:<8} {h.qty:>8,d}주  평단 ${h.avg_px:>8.4f}  "
+                  f"현재 ${h.last_px:>8.4f}  "
+                  f"평가손익 ${h.pnl_usd:>9,.2f} ({h.pnl_pct:+.2f}%)")
+        # output2 is USD, not KRW: `frcr` is 외화. And tot_evlu_pfls_amt is the
+        # market VALUE despite the name -- on 7 QTEX at $1.12 it returns 7.84.
+        # This block previously divided the USD cost basis by the FX rate and
+        # printed market value as P&L, turning $8.47 of cost into one cent.
+        # See live/holdings.py for the field-by-field reading.
+        if summary.cost_basis or summary.market_value:
+            print(f"  ---- 매입원금 $ {summary.cost_basis:,.2f}  "
+                  f"평가금액 $ {summary.market_value:,.2f}")
+            print(f"       평가손익 $ {summary.unrealised_pnl:+,.2f}  "
+                  f"실현손익 $ {summary.realised_pnl:+,.2f}  "
+                  f"수익률 {summary.return_pct:+.2f}%")
 
         if rows:
             print()
-            print("  ⚠ 이 계좌는 pivot-engine 의 모의 운용 계좌입니다. 위 보유 종목은")
-            print("    그쪽 전략이 낸 포지션이고, 여기서 주문을 내면 서로 간섭합니다.")
+            if settings.env == "paper":
+                print("  ⚠ 이 모의계좌는 pivot-engine 과 공유됩니다. 위 보유 종목은")
+                print("    그쪽 전략이 낸 포지션일 수 있고, 여기서 주문을 내면 간섭합니다.")
+            else:
+                print("  보유 종목의 스톱/트레일 상태는 이 스크립트가 아니라")
+                print("  scripts/positions.py 가 보여줍니다. 거기에 기록이 없는 종목은")
+                print("  스톱이 어디에도 존재하지 않는 상태입니다.")
 
     print()
     print("=== what this account can run ===")

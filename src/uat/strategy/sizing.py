@@ -51,6 +51,27 @@ def stop_is_viable(entry_px: float, atr14: float, atr_mult: float, min_pct: floa
     return stop_distance(entry_px, atr14, atr_mult, min_pct) <= MAX_STOP_PCT * entry_px
 
 
+def stop_level(
+    entry_px: float,
+    atr14: float,
+    atr_mult: float = 2.5,
+    stop_min_pct: float = 0.20,
+    *,
+    clamp: bool = True,
+) -> float:
+    """The stop price for an entry at `entry_px`. Single source of truth.
+
+    `size_position` returns this for positions the system opens, and
+    `live.positions.adopt_holding` calls it for one entered by hand at the
+    broker. Both have to land on the same number -- a stop that depends on how
+    the position was created is not a stop, it is two strategies.
+    """
+    dist = stop_distance(entry_px, atr14, atr_mult, stop_min_pct)
+    if clamp:
+        dist = min(dist, MAX_STOP_PCT * entry_px)
+    return max(0.01, entry_px - dist)
+
+
 def size_position(
     equity: float,
     entry_px: float,
@@ -85,7 +106,7 @@ def size_position(
         return SizingResult(
             0, 0.0, 0.0, 0.0, rejected=True, reject_reason="stop_wider_than_price"
         )
-    stop_px = max(0.01, entry_px - dist)
+    stop_px = stop_level(entry_px, atr14, atr_mult, stop_min_pct, clamp=clamp_stop)
 
     small = equity < small_account_usd if single_position_mode is None else single_position_mode
 

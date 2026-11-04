@@ -38,6 +38,27 @@ TR_IDS: dict[str, tuple[str, str]] = {
 EXCHANGE_CODES = {"NASDAQ": "NASD", "NYSE": "NYSE", "AMEX": "AMEX"}
 
 
+def kis_num(d: dict, *keys: str, default: float = 0.0) -> float:
+    """First parseable number among `keys`.
+
+    Every numeric field KIS returns is a string, sometimes comma-grouped,
+    sometimes "-" or "" for absent, and the field NAME varies between paper and
+    live for the same quantity. Callers therefore pass several candidate keys
+    and take whichever answers.
+    """
+    for k in keys:
+        if k not in d:
+            continue
+        raw = str(d[k]).strip()
+        if raw in ("", "-"):
+            continue
+        try:
+            return float(raw.replace(",", ""))
+        except ValueError:
+            continue
+    return default
+
+
 class TokenBucket:
     """Blocking token bucket. Overseas KIS allows ~1 req/s; we use 0.8."""
 
