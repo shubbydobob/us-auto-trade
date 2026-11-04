@@ -32,7 +32,12 @@ import pandas as pd
 from uat.backtest.costs import CostParams, fees, fill_price, stop_fill_price
 from uat.strategy.exits import ExitParams, apply_fill, evaluate_exits, update_trackers
 from uat.strategy.sizing import size_position, stop_level
-from uat.strategy.types import Bar, ExitReason, Position, PositionState
+
+# 이 세션 수만큼 연속으로 바가 없으면 마지막 관측가로 강제 청산한다. 상장폐지나
+# 장기 거래정지를 "영구 보유"로 처리하면 슬롯이 영원히 묶이고, 그 포지션은
+# trades 에도 잡히지 않아 통계에서 사라진다.
+MAX_NO_DATA_SESSIONS = 10
+from uat.strategy.types import Bar, ExitOrder, ExitReason, Position, PositionState
 
 
 @dataclass(frozen=True)
@@ -199,6 +204,12 @@ class Backtester:
 
         positions: dict[str, Position] = {}
         entry_meta: dict[str, dict] = {}
+        # 마지막으로 관측한 종가. 바가 없는 세션에 포지션을 진입가로 평가하면
+        # 손실이 등가곡선에서 사라진다 -- 이 버그가 하던 일이 정확히 그것이다.
+        last_px: dict[str, float] = {}
+        # 연속으로 바가 없었던 세션 수. 상장폐지/장기 거래정지를 영구 보유로
+        # 바꾸지 않기 위해 한도를 넘으면 마지막 관측가로 강제 청산한다.
+        no_data: dict[str, int] = {}
         pending: list[PendingEntry] = []
         trades: list[Trade] = []
         skipped: list[dict] = []
@@ -216,7 +227,28 @@ class Backtester:
                 pos = positions[symbol]
                 row = self._bar(symbol, dt)
                 if row is None:
+                    # 바가 없는 세션. 종목이 유니버스 티어에서 이탈해도 보유
+                    # 포지션은 관리해야 한다 -- 게이트는 진입 필터이지 청산
+                    # 필터가 아니다. 패널을 left join 으로 바꾼 뒤에도 바가
+                    # 없다면 그것은 티어 이탈이 아니라 데이터 자체의 부재다.
+                    n = no_data[symbol] = no_data.get(symbol, 0) + 1
+                    if n >= MAX_NO_DATA_SESSIONS and symbol in last_px:
+                        px = max(last_px[symbol], 0.01)
+                        fee = fees("SELL", pos.qty_open, px, self.cost)
+                        qty = pos.qty_open
+                        cash += qty * px - fee
+                        pos.fees_paid += fee
+                        apply_fill(pos, ExitOrder(ExitReason.TIME, qty, px), px,
+                                   self.exit_params)
+                        meta = entry_meta[symbol]
+                        meta.update({"exit_px": px, "exit_reason": "no_data",
+                                     "exit_dt": dt})
+                        trades.append(self._close_trade(pos, meta))
+                        del positions[symbol]
+                        del entry_meta[symbol]
                     continue
+                no_data[symbol] = 0
+                last_px[symbol] = float(row["close"])
                 if pos.opened_on >= dt:
                     continue
 
@@ -264,7 +296,15 @@ class Backtester:
             mtm = 0.0
             for symbol, pos in positions.items():
                 row = self._bar(symbol, dt)
-                px = float(row["close"]) if row is not None else pos.entry_px
+                if row is not None:
+                    px = float(row["close"])
+                    last_px[symbol] = px
+                else:
+                    # 진입가로 평가하면 평가손실이 0 이 된다. 티어를 이탈한
+                    # 종목은 대개 $0.50 아래로 떨어졌거나 거래량이 말라서
+                    # 이탈하므로, 진입가 평가는 패자의 손실만 선택적으로
+                    # 지우는 방향으로 P&L 을 부풀린다.
+                    px = last_px.get(symbol, pos.entry_px)
                 mtm += pos.qty_open * px
             equity = cash + mtm
             hwm = max(hwm, equity)
@@ -342,6 +382,10 @@ class Backtester:
         if prev is None:
             return None, "no_prev_bar"
 
+        # 패널이 left join 으로 바뀌어 비게이트 행도 들어온다. 진입만 게이트를
+        # 요구한다 -- 청산은 티어와 무관하게 평가되어야 한다.
+        if not bool(row.get("gated", True)):
+            return None, "not_in_universe"
         if bool(row.get("halted", False)) or bool(row.get("limit_locked", False)):
             return None, "halted"
 

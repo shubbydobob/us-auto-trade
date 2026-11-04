@@ -45,7 +45,7 @@ KRW_PER_USD = 1380.0
 # Bump when the panel's columns or their computation change, so a cached panel
 # from before the change is never silently reused. sma20 moving into the
 # feature pipeline is exactly the kind of change that has to invalidate it.
-FEATURE_PANEL_VERSION = 2
+FEATURE_PANEL_VERSION = 3
 
 
 def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
@@ -58,8 +58,12 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
     print("universe gate ...")
     metrics = bar_level_metrics(bars)
     tiered = classify_tier(metrics, settings=s)
-    gate = tiered.loc[tiered["tier"].isin(["core", "watch"]), ["symbol", "dt", "cs_spread_20"]]
-    keep = gate["symbol"].unique().tolist()
+    # `keep` 은 "한 세션이라도 거래 가능했던 종목"이라 게이트 통과 행에서 뽑는다.
+    # `gate` 는 전 행을 들고 간다 -- cs_spread_20 은 체결가 모델이 쓰므로 티어를
+    # 이탈한 세션의 청산에도 필요하고, tier 는 gated 플래그의 근거다.
+    gated_rows = tiered.loc[tiered["tier"].isin(["core", "watch"])]
+    keep = gated_rows["symbol"].unique().tolist()
+    gate = tiered[["symbol", "dt", "tier", "cs_spread_20"]]
     print(f"  {len(keep):,} symbols with >=1 tradeable session")
 
     if max_symbols and len(keep) > max_symbols:
@@ -80,8 +84,18 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
         "mfi_14", "ret_20", "sma20",
     ] + [f for w in SCORERS.values() for f, _, _ in w]
     cols = list(dict.fromkeys(c for c in cols if c in feats.columns))
+    # LEFT join. 과거에는 inner join 이어서 게이트를 통과하지 못한 세션의 행이
+    # 패널에서 사라졌고, 보유 포지션의 종목이 티어를 이탈하면 engine._bar() 가
+    # None 을 돌려주어 그 포지션이 다시 평가되지 않았다. 슬롯을 영구 점유하고,
+    # mtm 은 진입가로 고정되어 손실이 등가곡선에서 사라지고, trades 에도 잡히지
+    # 않아 통계에서도 사라졌다. 종목의 89.8% 가 첫 통과일~마지막 통과일 사이에
+    # 결손 구간을 갖고(최장 결손 중간값 112세션), 2020년 이후 25슬롯 중 평균
+    # 24.9개가 그런 포지션으로 채워져 있었다.
+    #
+    # 게이트는 진입 필터다. 청산은 티어와 무관하게 평가되어야 한다.
     panel = bars.merge(feats[cols], on=["symbol", "dt"], how="left")
-    panel = panel.merge(gate, on=["symbol", "dt"], how="inner")
+    panel = panel.merge(gate, on=["symbol", "dt"], how="left")
+    panel["gated"] = panel["tier"].isin(["core", "watch"])
     panel = panel.sort_values(["symbol", "dt"])
 
     # sma20 now comes from the feature pipeline, where the live path reads it
@@ -121,7 +135,14 @@ def prepare_cached(start: date, end: date | None, max_symbols: int | None,
 
 
 def make_signals(panel: pd.DataFrame, which: str, k: int) -> pd.DataFrame:
-    scored = score(panel, SCORERS[which])
+    """게이트 통과 행에서만 랭킹한다.
+
+    패널이 left join 으로 바뀐 뒤 비게이트 행도 들어오므로, 그대로 스코어링하면
+    교차섹션 백분위의 모집단이 달라져 랭킹 자체가 바뀐다. 진입 대상은 게이트
+    통과 종목뿐이므로 여기서 걸러야 한다.
+    """
+    pool = panel[panel["gated"]] if "gated" in panel.columns else panel
+    scored = score(pool, SCORERS[which])
     picks = top_k(scored, k=k)
     return picks[["dt", "symbol", "score"]]
 
