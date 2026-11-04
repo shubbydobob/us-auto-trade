@@ -38,7 +38,7 @@ labeling:
 
 risk:
   # Sizing auto-switches to single-position mode below small_account_usd.
-  risk_per_trade: 0.01
+  risk_per_trade: 0.004
   small_account_usd: 1450                      # ~KRW 2,000,000 @ 1380
   stop_atr_mult: 2.5
   stop_min_pct: 0.20
@@ -48,9 +48,16 @@ risk:
   # These three must stay consistent: max_concurrent * risk_per_trade <= heat.
   # Previously 10 x 1% = 10% against a 5% cap, which the sizer resolved by
   # shrinking later positions to dust instead of refusing them.
-  max_concurrent_positions: 5
-  max_portfolio_heat: 0.05
-  max_new_entries_per_day: 3
+  #
+  # 25 slots x 0.4% (experiment G, docs/research_log.md). Experiment C measured
+  # that widening the book was monotonically WORSE and that is still true with
+  # the shipped ladder and both early exits on -- extra slots only admitted
+  # weaker signals. With thesis-break off the binding constraint moves to slot
+  # count, and the sign flips: 5 -> 10 -> 15 -> 25 slots improved monotonically
+  # on train AND holdout, in two independent symbol universes.
+  max_concurrent_positions: 25
+  max_portfolio_heat: 0.10
+  max_new_entries_per_day: 8
   daily_loss_soft: -0.03
   daily_loss_hard: -0.06
   drawdown_halt: -0.20
@@ -60,14 +67,34 @@ risk:
   min_universe_ingest_rate: 0.85               # below this -> data-quality breaker
 
 exits:
-  tp1_gain: 0.30
-  tp1_fraction: 0.3333
-  tp2_gain: 0.80
-  tp2_fraction: 0.3333
+  # NO TAKE-PROFIT LADDER. The 9.99 gains disable the tranches rather than
+  # deleting the code path, so a future experiment can turn them back on.
+  #
+  # The signal is trained on a +60% / 20-session triple barrier. Selling a
+  # third at +30% caps exactly the move being predicted, and the trades that
+  # pay for everything else are the ones it caps. Experiment C first measured
+  # this; experiment G confirmed it with no selection involved -- a ladderless
+  # book beat the shipped one in all three non-overlapping windows
+  # (2020-2021, 2022-2023, 2024-2026) while the shuffled control was negative
+  # in all three.
+  tp1_gain: 9.99
+  tp1_fraction: 0.0
+  tp2_gain: 9.99
+  tp2_fraction: 0.0
   trail_pct_of_high: 0.25
   trail_pct_tight: 0.18
   trail_tighten_above_gain: 2.00
   trail_atr_mult: 3.0
+  # With no ladder the trail must be activated by gain, not by a TP tranche --
+  # otherwise disabling the ladder silently disables the trail too, which is
+  # the bug commit 01898e1 found.
+  trail_activate_gain: 0.40
+  # Thesis-break OFF. It fired on 141 of 277 trades at an average -12.5% and
+  # looked like the dominant loss source, but it was not reducing losses: it
+  # was removing the small-win population, which manufactured a high payoff
+  # ratio out of a worse book. Turning it off beats keeping it at every slot
+  # count tested, and in every window.
+  thesis_enabled: false
   exhaustion_min_gain: 1.50
   exhaustion_volume_mult: 3.0
   time_stop_sessions: 15
