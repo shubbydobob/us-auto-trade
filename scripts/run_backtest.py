@@ -42,6 +42,11 @@ from uat.universe.filters import bar_level_metrics, classify_tier  # noqa: E402
 
 KRW_PER_USD = 1380.0
 
+# Bump when the panel's columns or their computation change, so a cached panel
+# from before the change is never silently reused. sma20 moving into the
+# feature pipeline is exactly the kind of change that has to invalidate it.
+FEATURE_PANEL_VERSION = 2
+
 
 def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
     """Bars + features + universe gate + halt flags, ready for the engine."""
@@ -88,6 +93,30 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
     # run, which has to be re-run rather than compared across the change.
 
     print(f"  engine panel: {len(panel):,} rows")
+    return panel, s
+
+
+def prepare_cached(start: date, end: date | None, max_symbols: int | None,
+                   seed: int, refresh: bool = False):
+    """`prepare` with the panel memoised to parquet.
+
+    The feature step dominates the runtime -- 8.6M bars through
+    compute_symbol_features takes tens of minutes -- and a parameter sweep
+    re-derives the identical panel on every iteration. Caching it is what makes
+    an experiment loop possible at all. The key covers every input that changes
+    the panel; anything else (exits, sizing, costs) is applied by the engine
+    afterwards and must NOT be part of the key.
+    """
+    key = (f"panel_{start}_{end or 'open'}_{max_symbols or 'all'}_{seed}"
+           f"_v{FEATURE_PANEL_VERSION}.parquet")
+    path = project_root() / "reports" / "cache" / key
+    if path.exists() and not refresh:
+        print(f"panel cache hit: {path.name}")
+        return pd.read_parquet(path), load_settings()
+    panel, s = prepare(start, end, max_symbols, seed)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    panel.to_parquet(path, index=False)
+    print(f"panel cached: {path.name}")
     return panel, s
 
 

@@ -41,6 +41,16 @@ class ExitParams:
     exhaustion_volume_mult: float = 3.0
     time_stop_sessions: int = 15
     time_stop_min_gain: float = 0.12
+    # Thesis-break knobs. The defaults reproduce the hard-coded rule exactly
+    # (enabled, no loss buffer, fires from the first session, rvol below 0.8),
+    # so exposing them changes no behaviour. They exist because the corrected
+    # sma20 made this exit fire on 103 of 199 trades at an average -12.2%,
+    # which is where the gate failure now concentrates -- and a rule carrying
+    # that much P&L cannot be tuned while it is three literals in a function.
+    thesis_enabled: bool = True
+    thesis_max_rvol: float = 0.80
+    thesis_loss_buffer: float = 0.0     # close must sit below entry*(1-buffer)
+    thesis_min_sessions: int = 0
     # Gain at which the trail starts tracking, independent of the TP ladder.
     # Previously the trail engaged only after TP1 fired, so disabling the ladder
     # silently disabled the trail too and "let winners run" could not be tested
@@ -146,10 +156,12 @@ def evaluate_exits(
 
     # 4. Thesis break -- below entry, below the 20MA, and volume has gone.
     if (
-        bar.close < pos.entry_px
+        params.thesis_enabled
+        and pos.sessions_held >= params.thesis_min_sessions
+        and bar.close < pos.entry_px * (1.0 - params.thesis_loss_buffer)
         and bar.sma20 > 0
         and bar.close < bar.sma20
-        and bar.rvol_5 < 0.8
+        and bar.rvol_5 < params.thesis_max_rvol
     ):
         return [ExitOrder(ExitReason.THESIS, pos.qty_open, bar.close)]
 
