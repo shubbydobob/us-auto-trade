@@ -48,10 +48,22 @@ LADDERLESS = dict(
     trail_pct_of_high=0.25, trail_pct_tight=0.18, trail_activate_gain=0.40,
 )
 
+# 기준선은 명시적으로 고정해야 한다. 1판은 C_SHIPPED 의 청산 kwargs 를 {} 로 두어
+# "config 가 말하는 대로"를 의미하게 했는데, config/base.yaml 을 채택안으로 바꾼
+# 뒤 다시 돌리자 기준선이 같이 움직였다 -- C_SHIPPED 가 -6.04/-4.03/-8.83 에서
+# +0.35/+4.57/-1.38 로 바뀌었고, 그것은 구 설정이 아니라 "신 청산 + 5슬롯"이었다.
+# 고정 설정 비교에서 기준선이 config 를 읽으면 그 비교는 재현되지 않는다.
+LEGACY = dict(
+    tp1_gain=0.30, tp1_fraction=1 / 3, tp2_gain=0.80, tp2_fraction=1 / 3,
+    trail_pct_of_high=0.25, trail_pct_tight=0.18, trail_activate_gain=None,
+    thesis_enabled=True, thesis_max_rvol=0.80, thesis_loss_buffer=0.0,
+    thesis_min_sessions=0, time_stop_sessions=15, time_stop_min_gain=0.12,
+)
+
 # (label, exit kwargs, portfolio kwargs). Fixed in advance.
 CONFIGS = [
-    ("C_SHIPPED  5x1.0% thesis+time ladder",
-     {},
+    ("C_LEGACY   5x1.0% thesis+time ladder",
+     LEGACY,
      dict(max_concurrent=5, risk_per_trade=0.010,
           max_portfolio_heat=0.05, max_new_per_day=3)),
     ("C_MID     25x0.4% time only",
@@ -62,6 +74,19 @@ CONFIGS = [
      {**LADDERLESS, "thesis_enabled": False, "time_stop_sessions": 10_000},
      dict(max_concurrent=25, risk_per_trade=0.004,
           max_portfolio_heat=0.10, max_new_per_day=8)),
+    # 채택된 설정은 용량 포화다: max_concurrent 로 26,036 건이 막히는 동안
+    # 체결은 600 건뿐이다. 슬롯 단조 개선이 25 에서 멈추는지 확인한다. heat 는
+    # 10% 로 고정해 비교 대상이 슬롯 수이지 리스크 예산이 아니게 한다.
+    # KIS 웹소켓 심볼 상한이 41 이고 진입 감시와 공유하므로, 40/60 이 계속 좋아지면
+    # 거래소 제약이 전략의 엣지를 깎고 있다는 뜻이 된다.
+    ("C_S40     40x0.25% time only",
+     {**LADDERLESS, "thesis_enabled": False},
+     dict(max_concurrent=40, risk_per_trade=0.0025,
+          max_portfolio_heat=0.10, max_new_per_day=12)),
+    ("C_S60     60x0.17% time only",
+     {**LADDERLESS, "thesis_enabled": False},
+     dict(max_concurrent=60, risk_per_trade=0.0017,
+          max_portfolio_heat=0.10, max_new_per_day=15)),
 ]
 
 # Consecutive, non-overlapping. 2019 is short because the feature warm-up eats
