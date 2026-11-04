@@ -8,7 +8,11 @@ venv/
 # secrets
 .env
 config/.env
-data/.kis_token.json
+# Token caches. The rule used to name only the paper file, so the LIVE token
+# was tracked and pushed to a public repo. A KIS access token is useless
+# without the appkey/appsecret (which live in .env), and these expire in 24h,
+# but a brokerage credential does not belong in git either way.
+data/.kis_token*.json
 
 # data artifacts
 data/*.duckdb
