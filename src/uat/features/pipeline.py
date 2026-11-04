@@ -176,6 +176,17 @@ def compute_symbol_features(df: pd.DataFrame) -> pd.DataFrame:
 
     sma10 = c.rolling(10, min_periods=10).mean()
     sma20 = c.rolling(20, min_periods=20).mean()
+    # Emitted, not just used locally: exits.py reads bar.sma20 for the
+    # thesis-break rule. It used to be computed in scripts/run_backtest.py, so
+    # anything else building Bars from this panel -- the live loop, the position
+    # view -- silently got sma20=0, which disables thesis-break entirely
+    # (the rule is guarded by `bar.sma20 > 0`). In the backtest that exit
+    # accounted for -$2,908 over 83 trades, so losing it live is not cosmetic.
+    # NOTE: this is the SPLIT-ADJUSTED mean while Bar.close is as-traded. The
+    # two agree whenever adj_factor is 1, which is every recent bar, but they
+    # do not across a split. Left as-is deliberately: changing the basis moves
+    # the Phase 3 numbers and needs its own backtest run, not a quiet edit.
+    out["sma20"] = sma20
     sma50 = c.rolling(50, min_periods=50).mean()
     sma60 = c.rolling(60, min_periods=60).mean()
     sma120 = c.rolling(120, min_periods=100).mean()

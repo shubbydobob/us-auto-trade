@@ -72,18 +72,20 @@ def prepare(start: date, end: date | None, max_symbols: int | None, seed: int):
 
     cols = [
         "symbol", "dt", "atr14", "medvol_20", "addv_20", "rvol_5",
-        "mfi_14", "ret_20",
+        "mfi_14", "ret_20", "sma20",
     ] + [f for w in SCORERS.values() for f, _, _ in w]
     cols = list(dict.fromkeys(c for c in cols if c in feats.columns))
     panel = bars.merge(feats[cols], on=["symbol", "dt"], how="left")
     panel = panel.merge(gate, on=["symbol", "dt"], how="inner")
-
-    # sma20 on the continuous series, for the thesis-break exit.
     panel = panel.sort_values(["symbol", "dt"])
-    panel["sma20"] = panel.groupby("symbol", sort=False).apply(
-        lambda g: (g["close"] / g["adj_factor"]).rolling(20, min_periods=20).mean(),
-        include_groups=False,
-    ).reset_index(level=0, drop=True)
+
+    # sma20 now comes from the feature pipeline, where the live path reads it
+    # too. It used to be rolled here, AFTER the inner join against `gate` --
+    # which means the 20-period window walked only the rows that survived
+    # gating. A symbol drops in and out of the core/watch tier day to day, so
+    # that window was 20 scattered sessions, not the last 20. The thesis-break
+    # exit fires off this number; expect its timing to shift versus the Phase 3
+    # run, which has to be re-run rather than compared across the change.
 
     print(f"  engine panel: {len(panel):,} rows")
     return panel, s
